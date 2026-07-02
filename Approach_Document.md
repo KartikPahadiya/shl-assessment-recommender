@@ -27,27 +27,108 @@ The agent is implemented as a **LangGraph state machine** with 7 nodes connected
 ### 2.1 Graph Structure
 
 ```
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│  parser  │────→│  safety  │────→│  router  │────→│ retrieve │────→│ formatter│────→│ compare  │────→│ completion│
-└──────────┘     └──────────┘     └──────────┘     └──────────┘     └──────────┘     └──────────┘     └──────────┘
-                                      │
-                                      │ (ask)
-                                      ↓
-                                  ┌──────────┐
-                                  │  context │
-                                  │  (reply) │
-                                  └──────────┘
+                     ┌──────────────┐
+                     │    START     │
+                     └──────┬───────┘
+                            │
+                            v
+              ┌──────────────────────────┐
+              │  1. parse_input_node     │
+              │  Extract role, seniority,  │
+              │  skills, language, etc.   │
+              │  (LLM + regex fallback)   │
+              └──────────┬───────────────┘
+                         │
+                         v
+              ┌──────────────────────────┐
+              │  2. safety_check_node    │
+              │  Keyword-based detection   │
+              │  of prompt injection &     │
+              │  off-topic requests       │
+              └──────────┬───────────────┘
+                         │
+              ┌──────────┴──────────┐
+              │ safety_violation?   │
+              │     Yes  ────────→  │───→ END (refusal response)
+              │     No            │
+              └──────────┬──────────┘
+                         │
+                         v
+              ┌──────────────────────────┐
+              │  3. memory_merge_node    │
+              │  Merge new constraints     │
+              │  into accumulated state;   │
+              │  remove user-deleted ones │
+              └──────────┬───────────────┘
+                         │
+                         v
+              ┌──────────────────────────┐
+              │  4. router_node          │
+              │  Decide: ask / retrieve /│
+              │  compare / recommend     │
+              └──────────┬───────────────┘
+                         │
+              ┌──────────┼──────────┐
+              │          │          │
+              v          v          v
+     ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+     │  ask (if     │  │  retrieve &  │  │ compare (if  │
+     │  insufficient│  │  recommend  │  │ user asks    │
+     │  context)    │  │  (if ready)  │  │ "difference") │
+     └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+            │                 │                 │
+            v                 v                 v
+     ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+     │  context     │  │  5. retrieve │  │ 6. compare   │
+     │  _node       │  │  _node       │  │  _node       │
+     │  (follow-up  │  │  FAISS +     │  │  LLM-grounded│
+     │  question)   │  │  BM25 hybrid │  │  side-by-side│
+     └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+            │                 │                 │
+            │                 v                 │
+            │        ┌──────────────┐          │
+            │        │  6. formatter│          │
+            │        │  _node       │          │
+            │        │  Conversational│         │
+            │        │  reply gen   │          │
+            │        └──────┬───────┘          │
+            │               │                  │
+            │               v                  │
+            │      ┌────────────────┐         │
+            │      │ 7. completion  │         │
+            │      │   _node        │         │
+            │      │  Detect "end"  │         │
+            │      │  signals; 7-turn│         │
+            │      │  hard cap      │         │
+            │      └──────┬───────┘         │
+            │             │                  │
+            │             v                  │
+            │      ┌──────────────┐         │
+            │      │     END      │         │
+            │      │  Return JSON │         │
+            │      │  response    │         │
+            │      └──────────────┘         │
+            │                               │
+            └──────────────┬────────────────┘
+                           │
+                           v
+                    ┌──────────────┐
+                    │     END      │
+                    │  (context    │
+                    │   reply)    │
+                    └──────────────┘
 ```
 
 **Edge logic:**
-- `parser → safety` (always)
-- `safety → router` (always)
-- `router → retrieve` (if intent is "retrieve" or "recommend")
-- `router → context` (if intent is "ask" — gathers more info)
-- `retrieve → formatter` (always)
-- `formatter → compare` (if intent is "compare")
-- `formatter → completion` (always)
-- `compare → completion` (always)
+- `parse_input → safety_check` (always)
+- `safety_check → memory_merge` (if no violation) → `router`
+- `safety_check → END` (if violation — refusal response)
+- `router → context_node` (if intent is `ask` — gather more info)
+- `router → retrieve_node` (if intent is `retrieve` or `recommend`)
+- `router → compare_node` (if intent is `compare`)
+- `retrieve → formatter → completion → END`
+- `compare → completion → END`
+- `context → END` (return follow-up question, no recommendations)
 
 ### 2.2 State Object
 
@@ -252,6 +333,57 @@ All design decisions (hybrid retrieval, stateless API, router logic, evaluation 
 1. **Python/C++ relevance:** Only 1 direct item each in the catalog. FAISS clusters all programming languages together. A keyword-only fallback or fine-tuned embedding model would fix this, but both require significant extra work.
 2. **LLM dependency:** Groq free tier has rate limits. If the API is hit heavily, some nodes could fall back to regex-based extraction (already implemented for the parser).
 3. **No stateful caching:** Every turn rebuilds the full state from scratch. This is fine for 8-turn conversations but would be inefficient for 100+ turn sessions.
+
+---
+
+## 9. Project Structure
+
+```
+shl-assessment-recommender/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # FastAPI app: /health, /chat endpoints, CORS
+│   ├── schemas.py                 # Pydantic models: Message, ChatRequest, ChatResponse, Recommendation
+│   ├── llm.py                     # Groq LLM setup (llama-3.1-8b-instant)
+│   ├── mappings.py                # Catalog key → test_type mapping, build_recommendation()
+│   ├── state.py                   # AgentState dataclass definition
+│   ├── graph.py                   # LangGraph compilation: nodes + edges assembled
+│   ├── data/
+│   │   ├── catalog_fixed.json     # Scraped SHL catalog (400+ items, fields normalized)
+│   │   ├── faiss.index            # Prebuilt FAISS index (embeddings for all items)
+│   │   └── metadata.pkl           # Catalog metadata aligned with FAISS index
+│   ├── nodes/
+│   │   ├── __init__.py
+│   │   ├── context_node.py        # Generates follow-up questions when context is insufficient
+│   │   ├── parser_node.py         # Extracts constraints + readiness signals from user text (LLM + regex fallback)
+│   │   ├── safety_node.py         # Keyword-based prompt injection / off-topic / unsafe detection
+│   │   ├── router_node.py         # Decides ask / retrieve / recommend / compare per turn
+│   │   ├── retrieve_node.py       # Builds query from constraints, calls retriever, filters removed items
+│   │   ├── formatter_node.py      # LLM generates conversational reply from top-k retrieved docs
+│   │   ├── compare_node.py        # LLM-grounded comparison of two named assessments
+│   │   ├── memory_node.py         # Merges new constraints, handles removals, deduplicates skills
+│   │   └── completion_node.py     # Detects end-of-conversation signals, enforces 7-turn hard cap
+│   └── rag/
+│       ├── __init__.py
+│       ├── retriever.py           # Hybrid FAISS + BM25 pipeline with post-filtering
+│       ├── embeddings.py          # SentenceTransformer (BAAI/bge-small-en-v1.5) encoder
+│       ├── vectorstore.py         # FAISS index loader + metadata with _idx mapping
+│       ├── keyword_search.py      # BM25Okapi tokenization + scoring on name/desc/keys/levels
+│       └── filter.py              # Constraint-based metadata filtering (duration, remote, adaptive, etc.)
+├── scripts/
+│   ├── scrape_catalog.py          # Original SHL catalog scraper (not used at runtime)
+│   └── fix_catalog.py             # Normalizes raw scraped JSON into catalog_fixed.json
+├── SampleConversations/
+│   ├── C1.md … C10.md             # Provided test traces with personas + expected outputs
+├── test_conversations.py          # Test harness: replays all 10 traces, validates schema + URLs
+├── test_api.py                    # Quick manual test script against deployed API
+├── requirements.txt               # All Python dependencies (fastapi, uvicorn, langgraph, groq, etc.)
+├── .python-version                # Python 3.10 (for Render build)
+├── Dockerfile                     # HF Spaces deployment config (CPU torch, model pre-download)
+├── README.md                      # Space README with API docs
+├── Approach_Document.md           # This document (Markdown source)
+└── SHL_Approach_Document.pdf      # PDF export of this document
+```
 
 ---
 
