@@ -16,6 +16,14 @@ def router_node(state):
     constraints = state["constraints"]
     turn_count = state.get("turn_count", 1)
 
+    # VAGUENESS CHECK: On turn 1, if the query is very short and vague,
+    # always clarify regardless of what the parser extracted.
+    # This prevents "I need an assessment" or "I need a assessment for hiring"
+    # from immediately returning recommendations.
+    if turn_count == 1 and len(query.split()) < 8:
+        state["intent"] = "clarify"
+        return state
+
     # Minimum info needed
     has_role = constraints.get("role") is not None
     has_seniority = constraints.get("seniority") is not None
