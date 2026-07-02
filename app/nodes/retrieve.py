@@ -48,40 +48,20 @@ def retrieve_node(state):
 
     docs = retrieve(query, constraints=constraints, k=10)
 
-    # Filter out removed items/skills by name
+    # Filter out explicitly removed items/skills by name
     removed_skills = [r.lower() for r in removed.get("skills", [])]
     removed_items = [r.lower() for r in removed.get("items", [])]
 
     filtered_docs = []
     for doc in docs:
         doc_name_lower = doc.get("name", "").lower()
-        # Skip if explicitly removed by name
         if any(ri in doc_name_lower for ri in removed_items):
             continue
-        # Skip if removed skill appears in doc name
         if any(rs in doc_name_lower for rs in removed_skills):
             continue
         filtered_docs.append(doc)
 
     docs = filtered_docs
-
-    # Boost exact name matches for skills/role keywords (critical for relevance)
-    query_lower = query.lower()
-    boost_keywords = [w for w in query_lower.split() if len(w) > 2]
-    for doc in docs:
-        name_lower = doc.get("name", "").lower()
-        desc_lower = doc.get("description", "").lower()
-        boost = 0.0
-        for kw in boost_keywords:
-            if kw in name_lower:
-                boost += 0.4  # strong boost for name match
-            elif kw in desc_lower:
-                boost += 0.1  # small boost for description match
-        doc["score"] = doc.get("score", 0) + boost
-
-    # Re-sort by boosted score
-    docs.sort(key=lambda x: x.get("score", 0), reverse=True)
-    docs = docs[:10]
 
     if len(docs) == 0:
         state["reply"] = (
@@ -93,10 +73,7 @@ def retrieve_node(state):
         state["end_of_conversation"] = False
         return state
 
-    docs = docs[:10]
-
     recommendations = []
-
     for doc in docs:
         recommendations.append({
             "name": doc["name"],
