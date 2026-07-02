@@ -29,14 +29,27 @@ def retrieve_node(state):
         query_parts.append(language)
 
     # ADD SKILLS TO QUERY — repeat each skill 3× to boost weight in FAISS + BM25
+    # For programming languages, also add "programming" and "coding" to catch
+    # general coding simulations (e.g., Automata items that support 40+ languages)
+    programming_languages = {
+        "python", "java", "c++", "c#", "javascript", "php", "r", "sql",
+        "go", "rust", "kotlin", "swift", "perl", "ruby", "scala", "typescript"
+    }
+    has_programming_skill = False
     skills = constraints.get("skills", [])
     if isinstance(skills, list):
         for s in skills:
             if s:
-                # repeat 3 times for stronger keyword + semantic signal
                 query_parts.extend([str(s)] * 3)
+                if s.lower() in programming_languages:
+                    has_programming_skill = True
     elif isinstance(skills, str) and skills:
         query_parts.extend([skills] * 3)
+        if skills.lower() in programming_languages:
+            has_programming_skill = True
+
+    if has_programming_skill:
+        query_parts.extend(["programming", "coding"])
 
     query = " ".join(query_parts)
 
@@ -68,6 +81,24 @@ def retrieve_node(state):
         filtered_docs.append(doc)
 
     docs = filtered_docs
+
+    # Boost exact name matches for skills/role keywords (critical for relevance)
+    query_lower = query.lower()
+    boost_keywords = [w for w in query_lower.split() if len(w) > 2]
+    for doc in docs:
+        name_lower = doc.get("name", "").lower()
+        desc_lower = doc.get("description", "").lower()
+        boost = 0.0
+        for kw in boost_keywords:
+            if kw in name_lower:
+                boost += 0.4  # strong boost for name match
+            elif kw in desc_lower:
+                boost += 0.1  # small boost for description match
+        doc["score"] = doc.get("score", 0) + boost
+
+    # Re-sort by boosted score
+    docs.sort(key=lambda x: x.get("score", 0), reverse=True)
+    docs = docs[:10]
 
     if len(docs) == 0:
         state["reply"] = (
