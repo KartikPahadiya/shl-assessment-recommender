@@ -38,8 +38,8 @@ def retrieve(query, constraints=None, k=5):
         keyword_scores.max() - keyword_scores.min() + 1e-8
     )
 
-    # --- Stage 5: Hybrid — 70% semantic, 30% keyword ---
-    final_scores = 0.7 * vector_scores + 0.3 * keyword_scores
+    # --- Stage 5: Hybrid — 90% semantic, 10% keyword ---
+    final_scores = 0.9 * vector_scores + 0.1 * keyword_scores
 
     for i, item in enumerate(candidates):
         item["score"] = float(final_scores[i])
