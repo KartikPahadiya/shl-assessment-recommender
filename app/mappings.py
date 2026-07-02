@@ -33,11 +33,25 @@ def build_recommendation(item):
     """Build a schema-compliant recommendation dict from a catalog item."""
     # retrieve_node stores URL as 'url', but raw catalog items have 'link'
     url = item.get("url") or item.get("link", "")
+
+    def _bool(value):
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lower = value.lower().strip()
+            if lower in ("yes", "true", "1", "y"):
+                return True
+            if lower in ("no", "false", "0", "n"):
+                return False
+        return None
+
     return {
         "name": item.get("name", ""),
         "url": url,
         "test_type": map_keys_to_test_type(item.get("keys", [])),
         "duration": item.get("duration") or None,
-        "remote": item.get("remote") or None,
-        "adaptive": item.get("adaptive") or None,
+        "remote": _bool(item.get("remote")),
+        "adaptive": _bool(item.get("adaptive")),
     }
