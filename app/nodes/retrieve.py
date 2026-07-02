@@ -28,12 +28,15 @@ def retrieve_node(state):
     if language:
         query_parts.append(language)
 
-    # ADD SKILLS TO QUERY (critical fix)
+    # ADD SKILLS TO QUERY — repeat each skill 3× to boost weight in FAISS + BM25
     skills = constraints.get("skills", [])
     if isinstance(skills, list):
-        query_parts.extend(str(s) for s in skills if s)
-    elif isinstance(skills, str):
-        query_parts.append(skills)
+        for s in skills:
+            if s:
+                # repeat 3 times for stronger keyword + semantic signal
+                query_parts.extend([str(s)] * 3)
+    elif isinstance(skills, str) and skills:
+        query_parts.extend([skills] * 3)
 
     query = " ".join(query_parts)
 
