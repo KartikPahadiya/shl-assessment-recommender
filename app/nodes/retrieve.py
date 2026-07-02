@@ -28,28 +28,11 @@ def retrieve_node(state):
     if language:
         query_parts.append(language)
 
-    # ADD SKILLS TO QUERY — repeat each skill 3× to boost weight in FAISS + BM25
-    # For programming languages, also add "programming" and "coding" to catch
-    # general coding simulations (e.g., Automata items that support 40+ languages)
-    programming_languages = {
-        "python", "java", "c++", "c#", "javascript", "php", "r", "sql",
-        "go", "rust", "kotlin", "swift", "perl", "ruby", "scala", "typescript"
-    }
-    has_programming_skill = False
     skills = constraints.get("skills", [])
     if isinstance(skills, list):
-        for s in skills:
-            if s:
-                query_parts.extend([str(s)] * 3)
-                if s.lower() in programming_languages:
-                    has_programming_skill = True
+        query_parts.extend(str(s) for s in skills if s)
     elif isinstance(skills, str) and skills:
-        query_parts.extend([skills] * 3)
-        if skills.lower() in programming_languages:
-            has_programming_skill = True
-
-    if has_programming_skill:
-        query_parts.extend(["programming", "coding"])
+        query_parts.append(skills)
 
     query = " ".join(query_parts)
 
