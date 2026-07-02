@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from .schemas import ChatRequest, ChatResponse, Recommendation
 from .graph import graph
 from .mappings import build_recommendation
@@ -6,6 +7,15 @@ from .mappings import build_recommendation
 app = FastAPI(
     title="SHL Assessment Agent",
     version="1.0.0"
+)
+
+# Allow all origins for the frontend (Vercel) and local dev
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/health")
