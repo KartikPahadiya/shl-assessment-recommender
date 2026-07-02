@@ -44,9 +44,12 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# FAISS index and data files (large binaries)
+# FAISS index and data files - EXCEPT app/data/ which we need for deployment
 *.index
 *.pkl
+!app/data/*.index
+!app/data/*.pkl
+!app/data/*.json
 
 # Test outputs
 test_output/
